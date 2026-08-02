@@ -4,12 +4,16 @@ import { World } from './3d/World';
 import { Player } from './3d/Player';
 import { Monster } from './3d/Monster';
 import { NPC } from './3d/NPC';
+import { useGameStore } from '../store/gameStore';
 
 /**
  * 游戏主场景组件 (R3F)
  * 负责渲染 3D 世界、玩家、NPC 以及怪物
  */
 export const GameScene: React.FC = () => {
+    // 怪物列表由全局 Store 统一托管，场景层只负责遍历渲染
+    const monsters = useGameStore(state => state.monsters);
+
     return (
         <Canvas shadows camera={{ position: [0, 10, 15], fov: 50 }}>
             {/* 场景环境配置：深蓝色迷雾，营造神秘氛围 */}
@@ -47,13 +51,10 @@ export const GameScene: React.FC = () => {
                 ]}
             />
 
-            {/* 场景怪物生成区域 (Mob Spawning) */}
-            {/* 根据坐标、等级和数值手动配置各区域怪物 */}
-            <Monster id="m1" position={[5, 0, 5]} name="史莱姆" level={1} hp={30} maxHp={30} />
-            <Monster id="m2" position={[-5, 0, 8]} name="哥布林" level={2} hp={50} maxHp={50} />
-            <Monster id="m3" position={[8, 0, -5]} name="野狼" level={3} hp={80} maxHp={80} />
-            <Monster id="m4" position={[10, 0, 0]} name="史莱姆" level={1} hp={30} maxHp={30} />
-            <Monster id="m5" position={[-8, 0, -8]} name="精英哥布林" level={5} hp={150} maxHp={150} />
+            {/* 场景怪物：从全局 Store 读取，Monster 自行订阅各自的血量与存活状态 */}
+            {monsters.map(m => (
+                <Monster key={m.id} id={m.id} />
+            ))}
 
         </Canvas>
     );
