@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2 } from 'lucide-react';
 import { InventoryPanel } from './InventoryPanel';
 import { SkillTreePanel } from './SkillTreePanel';
 import { ShopPanel } from './ShopPanel';
+import { getSkillIcon, getSkillColor } from './skillIcons';
 import { motion, AnimatePresence } from 'framer-motion';
 
 /**
@@ -14,11 +15,52 @@ export const HUD: React.FC = () => {
     // 从 Store 中获取数据与控制函数
     const {
         player, logs, addItem, ui,
-        setInventoryOpen, setSkillsOpen, setShopOpen
+        setInventoryOpen, setSkillsOpen, setShopOpen,
+        skills, skillBar, selectedSkillSlot, skillCooldowns,
+        bindSkillToSlot, selectSkillSlot, castSkill
     } = useGameStore();
 
     // 控制下方战斗日志面板的折叠状态
     const [isLogExpanded, setIsLogExpanded] = useState(true);
+
+    // 技能绑定选择器：当前正在选择绑定技能的动作栏槽位索引 (null 表示关闭) —— 纯 UI 状态
+    const [bindingSlotIndex, setBindingSlotIndex] = useState<number | null>(null);
+
+    // 冷却倒计时渲染驱动：仅用于刷新槽位剩余秒数显示，冷却时间戳以 Store 为准
+    const [now, setNow] = useState(() => Date.now());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 500);
+        return () => clearInterval(timer);
+    }, []);
+
+    // 已习得 (等级 > 0) 的主动技能列表，可绑定至动作栏
+    const bindableSkills = skills.filter(s => s.type === 'active' && s.level > 0);
+
+    /**
+     * 动作栏槽位点击：
+     * - 空槽位：打开技能绑定选择器
+     * - 恢复型技能：无需目标，点击立即对自身施放
+     * - 伤害型技能：选定/取消选定，选定后点击场景怪物即施放
+     */
+    const handleSlotClick = (slotIndex: number) => {
+        const skillId = skillBar[slotIndex];
+        if (!skillId) {
+            setBindingSlotIndex(bindingSlotIndex === slotIndex ? null : slotIndex);
+            return;
+        }
+        const skill = skills.find(s => s.id === skillId);
+        if (skill?.effect?.kind === 'heal') {
+            castSkill(skillId);
+            return;
+        }
+        selectSkillSlot(selectedSkillSlot === slotIndex ? null : slotIndex);
+    };
+
+    /** 右键点击槽位：解除该槽位的技能绑定 */
+    const handleSlotContextMenu = (e: React.MouseEvent, slotIndex: number) => {
+        e.preventDefault();
+        if (skillBar[slotIndex]) bindSkillToSlot(null, slotIndex);
+    };
 
     /**
      * 开发者调试函数：增加一个高级装备
@@ -173,12 +215,55 @@ export const HUD: React.FC = () => {
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
-                    {/* 动作栏占位符：用于未来绑定快捷技能 */}
-                    {[1, 2, 3].map((slot) => (
-                        <button key={slot} className="w-10 h-10 bg-black/40 rounded-full border border-white/5 hover:border-white/20 transition-all flex items-center justify-center font-bold text-slate-500 text-xs">
-                            {slot}
-                        </button>
-                    ))}
+                    {/* 动作栏：技能槽位，可绑定已习得的主动技能 */}
+                    {skillBar.map((skillId, slotIndex) => {
+                        const skill = skillId ? skills.find(s => s.id === skillId) : null;
+                        const isSelected = skill !== null && selectedSkillSlot === slotIndex;
+
+                        // 冷却剩余秒数 (时间戳存于 Store，此处仅做显示换算)；蓝量不足判定
+                        const cooldownRemaining = skill ? Math.max(0, Math.ceil(((skillCooldowns[skill.id] ?? 0) - now) / 1000)) : 0;
+                        const isManaInsufficient = skill ? player.stats.mana < (skill.manaCost ?? 0) : false;
+
+                        // 槽位提示文案：优先展示冷却/蓝量等阻断原因
+                        const slotTitle = !skill
+                            ? `槽位 ${slotIndex + 1}：点击绑定主动技能`
+                            : cooldownRemaining > 0
+                                ? `${skill.name}：冷却中，剩余 ${cooldownRemaining} 秒`
+                                : isManaInsufficient
+                                    ? `${skill.name}：法力不足 (需要 ${skill.manaCost ?? 0} 点法力)`
+                                    : `${skill.name}：左键选定施放，右键解除绑定 (耗蓝 ${skill.manaCost ?? 0} / 冷却 ${skill.cooldown ?? 0} 秒)`;
+
+                        return (
+                            <button
+                                key={slotIndex}
+                                onClick={() => handleSlotClick(slotIndex)}
+                                onContextMenu={(e) => handleSlotContextMenu(e, slotIndex)}
+                                title={slotTitle}
+                                className={`w-10 h-10 rounded-full border transition-all flex items-center justify-center font-bold text-xs relative overflow-hidden ${isSelected
+                                        ? 'bg-blue-600/40 border-blue-400 text-white shadow-lg shadow-blue-900/40'
+                                        : !skill
+                                            ? 'bg-black/40 border-white/5 hover:border-white/20 text-slate-500'
+                                            : cooldownRemaining > 0
+                                                ? 'bg-black/40 border-white/10 text-slate-500'
+                                                : isManaInsufficient
+                                                    ? 'bg-blue-950/50 border-blue-500/40 text-blue-400'
+                                                    : 'bg-black/40 border-white/20 text-slate-300 hover:border-white/40'
+                                    }`}
+                            >
+                                {skill ? getSkillIcon(skill.icon, getSkillColor(skill.icon)) : slotIndex + 1}
+                                {/* 冷却遮罩：黑色蒙层 + 剩余秒数 */}
+                                {cooldownRemaining > 0 && (
+                                    <span className="absolute inset-0 rounded-full bg-black/70 flex items-center justify-center text-[11px] font-mono font-bold text-slate-200">
+                                        {cooldownRemaining}
+                                    </span>
+                                )}
+                                {/* 蓝量不足指示：右下角蓝色角标 (与选中态叠加也能一眼区分) */}
+                                {skill && cooldownRemaining === 0 && isManaInsufficient && (
+                                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-blue-400 border border-slate-900" />
+                                )}
+                            </button>
+                        );
+                    })}
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
@@ -191,6 +276,37 @@ export const HUD: React.FC = () => {
                         <PlusCircle size={20} />
                     </button>
                 </div>
+
+                {/* 技能绑定选择器：点击空槽位后弹出，选择已习得的主动技能完成绑定 */}
+                <AnimatePresence>
+                    {bindingSlotIndex !== null && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 8 }}
+                            className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 glass-panel bg-slate-900/90 p-2 rounded-xl border-white/10 shadow-2xl"
+                        >
+                            <div className="text-[9px] font-bold uppercase tracking-widest text-dim px-2 pb-1.5 mb-1 border-b border-white/5">
+                                绑定主动技能到槽位 {bindingSlotIndex + 1}
+                            </div>
+                            {bindableSkills.length === 0 ? (
+                                <div className="text-[10px] text-dim px-2 py-2">暂无已习得的主动技能</div>
+                            ) : (
+                                bindableSkills.map(skill => (
+                                    <button
+                                        key={skill.id}
+                                        onClick={() => { bindSkillToSlot(skill.id, bindingSlotIndex); setBindingSlotIndex(null); }}
+                                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/10 transition-colors text-left"
+                                    >
+                                        {getSkillIcon(skill.icon, getSkillColor(skill.icon))}
+                                        <span className="text-[11px] font-bold text-slate-200 flex-1">{skill.name}</span>
+                                        <span className="text-[9px] font-mono text-dim">LV.{skill.level}</span>
+                                    </button>
+                                ))
+                            )}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
             {/* 右上角区域：极简风格操作指南看板 */}
@@ -209,6 +325,7 @@ export const HUD: React.FC = () => {
                             </div>
                             <p className="mb-1"><span className="text-blue-400">WASD</span> 执行全向位移</p>
                             <p className="mb-1"><span className="text-red-400">MOUSE L</span> 执行单体打击</p>
+                            <p className="mb-1"><span className="text-purple-400">技能槽</span> 选定技能后点怪施放</p>
                             <p><span className="text-emerald-400">MOUSE L</span> 触发 NPC 交互</p>
                         </div>
                     </motion.div>

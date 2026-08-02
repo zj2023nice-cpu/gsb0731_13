@@ -1,60 +1,46 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { Html } from '@react-three/drei';
+import type { ThreeEvent } from '@react-three/fiber';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface MonsterProps {
     id: string;
-    position: [number, number, number];
-    name: string;
-    level: number;
-    hp: number;
-    maxHp: number;
 }
 
 /**
  * 怪物实体组件 (Monster Entity)
- * 处理怪物的 3D 渲染、简单的点击战斗逻辑及世界空间血条展示
+ * 仅负责 3D 渲染与交互转发；怪物数据与战斗结算均由全局 Store 统一管理
  */
-export const Monster: React.FC<MonsterProps> = ({ id, position, name, level, hp: initialHp, maxHp }) => {
-    // 怪物当前生命值状态 (局部状态，实际项目中应同步至 Store 以便全场景同步)
-    const [hp, setHp] = useState(initialHp);
-    const { addLog, addGold, ui } = useGameStore();
+export const Monster: React.FC<MonsterProps> = ({ id }) => {
+    // 从 Store 订阅当前怪物实体数据 (血量变化由全局战斗结算驱动)
+    const monster = useGameStore(state => state.monsters.find(m => m.id === id));
+    const { ui, skillBar, selectedSkillSlot, attackMonster, castSkill } = useGameStore();
 
     // 显隐逻辑：当 UI 面板（背包、技能树、商店）打开时隐藏 3D 悬浮 UI，防止视觉重合
     const showFloatingUI = !ui.isInventoryOpen && !ui.isSkillsOpen && !ui.isShopOpen;
 
     /**
-     * 点击交互处理：模拟基础攻击逻辑
+     * 点击交互处理：
+     * 动作栏存在已选定的技能时施放该技能，否则执行基础攻击
      * 只有在 UI 闭合状态下才允许点击世界中的怪物进行战斗
      */
-    const handleClick = (e: any) => {
+    const handleClick = (e: ThreeEvent<MouseEvent>) => {
         if (!showFloatingUI) return; // UI 面板打开时锁定世界交互
         e.stopPropagation(); // 阻止点击穿透到地表触发玩家移动
 
-        // --- 模拟战斗计算 ---
-        // 随机产生 5-10 点的基础伤害
-        const damage = Math.floor(Math.random() * 5) + 5;
-        const newHp = Math.max(0, hp - damage);
-
-        setHp(newHp);
-        addLog(`你攻击了 ${name}, 造成 ${damage} 点伤害!`);
-
-        // --- 死亡与重生处理逻辑 ---
-        if (newHp === 0) {
-            addLog(`${name} 被击败了! 获得 10 金币.`);
-            addGold(10); // 结算战利品
-
-            // 怪物重生计时器：5秒后恢复全血并重新渲染
-            setTimeout(() => {
-                setHp(maxHp);
-                addLog(`系统：${name} 已在其领地重新刷新。`);
-            }, 5000);
+        const armedSkillId = selectedSkillSlot !== null ? skillBar[selectedSkillSlot] : null;
+        if (armedSkillId) {
+            castSkill(armedSkillId, id);
+        } else {
+            attackMonster(id);
         }
     };
 
-    // 如果怪物血量为0（已死亡且未刷新阶段），不渲染模型核心
-    if (hp <= 0) return null;
+    // 怪物不存在或已死亡 (等待重生阶段) 时，不渲染模型核心
+    if (!monster || monster.hp <= 0) return null;
+
+    const { name, level, hp, maxHp, position } = monster;
 
     return (
         <group position={position} onClick={handleClick}>
