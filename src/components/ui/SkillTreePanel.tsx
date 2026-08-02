@@ -12,8 +12,8 @@ interface Props {
  * 实现技能展示、等级校验、点数分配及被动效果实时反馈
  */
 export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
-    // 获取全局状态：玩家属性、技能列表、剩余技能点以及升级动作
-    const { player, skills, skillPoints, upgradeSkill } = useGameStore();
+    // 获取全局状态：玩家属性、技能列表、剩余技能点、动作栏以及相关动作
+    const { player, skills, skillPoints, actionBar, upgradeSkill, equipSkillToSlot } = useGameStore();
 
     /**
      * 图标渲染辅助函数
@@ -76,6 +76,10 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                     {skills.map((skill) => {
                         // 实时计算该技能是否满足玩家当前的等级解锁条件
                         const isUnlocked = !skill.requirement || player.stats.level >= skill.requirement;
+                        // 已学习的主动技能才可绑定到动作栏
+                        const canEquip = skill.type === 'active' && skill.level > 0;
+                        // 该技能当前占用的动作栏槽位（未绑定则为 -1）
+                        const equippedSlot = actionBar.findIndex(id => id === skill.id);
 
                         return (
                             <div
@@ -113,6 +117,29 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                                             >
                                                 {skill.level === skill.maxLevel ? '已满级' : skillPoints > 0 ? '升级' : '点数不足'}
                                             </button>
+                                        )}
+
+                                        {/* 交互：绑定到动作栏。仅已学习的主动技能可用 */}
+                                        {canEquip && (
+                                            <div className="mt-2 flex items-center gap-2">
+                                                <span className="text-[9px] font-bold text-dim uppercase tracking-widest shrink-0">动作栏</span>
+                                                <div className="flex gap-1.5">
+                                                    {actionBar.map((_, slotIndex) => (
+                                                        <button
+                                                            key={slotIndex}
+                                                            onClick={() => equipSkillToSlot(skill.id, slotIndex)}
+                                                            title={`绑定到第 ${slotIndex + 1} 号快捷位`}
+                                                            className={`w-6 h-6 rounded-md text-[10px] font-bold transition-all ${
+                                                                equippedSlot === slotIndex
+                                                                    ? 'bg-amber-500 text-white shadow shadow-amber-900/30'
+                                                                    : 'bg-slate-900/60 text-slate-400 border border-white/10 hover:border-amber-400/60'
+                                                            }`}
+                                                        >
+                                                            {slotIndex + 1}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         )}
                                     </div>
                                 </div>

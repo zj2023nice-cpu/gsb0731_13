@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { useGameStore } from '../../store/gameStore';
 import { Html } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -14,43 +14,32 @@ interface MonsterProps {
 
 /**
  * 怪物实体组件 (Monster Entity)
- * 处理怪物的 3D 渲染、简单的点击战斗逻辑及世界空间血条展示
+ * 仅负责怪物的 3D 渲染与点击触发；血量等运行时状态统一由全局 Store 管理
+ * 组件挂载时把静态配置登记到 Store，之后从 Store 读取实时血量
  */
 export const Monster: React.FC<MonsterProps> = ({ id, position, name, level, hp: initialHp, maxHp }) => {
-    // 怪物当前生命值状态 (局部状态，实际项目中应同步至 Store 以便全场景同步)
-    const [hp, setHp] = useState(initialHp);
-    const { addLog, addGold, ui } = useGameStore();
+    const { ui, monsters, registerMonster, attackMonster } = useGameStore();
+
+    // 挂载时登记怪物运行时状态到全局 Store（已存在则保留当前血量）
+    useEffect(() => {
+        registerMonster({ id, name, level, hp: initialHp, maxHp });
+    }, [id, name, level, initialHp, maxHp, registerMonster]);
+
+    // 从全局状态读取实时血量；登记完成前回退到初始配置值
+    const hp = monsters[id]?.hp ?? initialHp;
 
     // 显隐逻辑：当 UI 面板（背包、技能树、商店）打开时隐藏 3D 悬浮 UI，防止视觉重合
     const showFloatingUI = !ui.isInventoryOpen && !ui.isSkillsOpen && !ui.isShopOpen;
 
     /**
-     * 点击交互处理：模拟基础攻击逻辑
-     * 只有在 UI 闭合状态下才允许点击世界中的怪物进行战斗
+     * 点击交互处理：将攻击结算交给全局 Store
+     * 组件本身不再承载伤害计算与血量记录，保持 UI/3D 与状态解耦
      */
     const handleClick = (e: any) => {
         if (!showFloatingUI) return; // UI 面板打开时锁定世界交互
         e.stopPropagation(); // 阻止点击穿透到地表触发玩家移动
 
-        // --- 模拟战斗计算 ---
-        // 随机产生 5-10 点的基础伤害
-        const damage = Math.floor(Math.random() * 5) + 5;
-        const newHp = Math.max(0, hp - damage);
-
-        setHp(newHp);
-        addLog(`你攻击了 ${name}, 造成 ${damage} 点伤害!`);
-
-        // --- 死亡与重生处理逻辑 ---
-        if (newHp === 0) {
-            addLog(`${name} 被击败了! 获得 10 金币.`);
-            addGold(10); // 结算战利品
-
-            // 怪物重生计时器：5秒后恢复全血并重新渲染
-            setTimeout(() => {
-                setHp(maxHp);
-                addLog(`系统：${name} 已在其领地重新刷新。`);
-            }, 5000);
-        }
+        attackMonster(id);
     };
 
     // 如果怪物血量为0（已死亡且未刷新阶段），不渲染模型核心
@@ -83,7 +72,6 @@ export const Monster: React.FC<MonsterProps> = ({ id, position, name, level, hp:
                             <div className="w-16 h-1.5 bg-black/40 rounded-full border border-white/10 overflow-hidden">
                                 {/* 血条进度填充：平滑补间动画方案 */}
                                 <motion.div
-                                    initial={{ width: 0 }}
                                     animate={{ width: `${(hp / maxHp) * 100}%` }}
                                     className="h-full"
                                     style={{
