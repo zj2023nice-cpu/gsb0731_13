@@ -1,7 +1,8 @@
 import React from 'react';
 import { useGameStore } from '../../store/gameStore';
-import { X, Zap, Target, Shield, Wind, Flame, Heart } from 'lucide-react';
+import { X, Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { getSkillIcon, getSkillColor } from './skillIcons';
 
 interface Props {
     onClose: () => void;
@@ -14,36 +15,6 @@ interface Props {
 export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
     // 获取全局状态：玩家属性、技能列表、剩余技能点以及升级动作
     const { player, skills, skillPoints, upgradeSkill } = useGameStore();
-
-    /**
-     * 图标渲染辅助函数
-     * 根据 Store 中的图标名称映射 Lucide 图标组件
-     */
-    const getIcon = (iconName: string, color: string) => {
-        switch (iconName) {
-            case 'Target': return <Target className={color} size={16} />;
-            case 'Shield': return <Shield className={color} size={16} />;
-            case 'Wind': return <Wind className={color} size={16} />;
-            case 'Flame': return <Flame className={color} size={16} />;
-            case 'Heart': return <Heart className={color} size={16} />;
-            default: return <Zap className={color} size={16} />;
-        }
-    };
-
-    /**
-     * 颜色映射辅助函数
-     * 为不同类型的技能提供视觉区分
-     */
-    const getColor = (iconName: string) => {
-        switch (iconName) {
-            case 'Target': return 'text-red-400';
-            case 'Shield': return 'text-blue-400';
-            case 'Wind': return 'text-green-400';
-            case 'Flame': return 'text-orange-400';
-            case 'Heart': return 'text-pink-400';
-            default: return 'text-purple-400';
-        }
-    };
 
     return (
         <div className="modal-overlay">
@@ -86,7 +57,7 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                                 <div className="flex gap-3">
                                     {/* 技能图标外框 */}
                                     <div className={`w-10 h-10 rounded-lg flex items-center justify-center bg-slate-900/60 border border-white/5 shrink-0`}>
-                                        {getIcon(skill.icon, getColor(skill.icon))}
+                                        {getSkillIcon(skill.icon, getSkillColor(skill.icon))}
                                     </div>
 
                                     {/* 技能详细信息 */}
@@ -100,6 +71,14 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                                             {/* 未达到等级需求时显示红色警告提示 */}
                                             {!isUnlocked && <span className="text-red-400 block mt-1">(需求等级: {skill.requirement})</span>}
                                         </p>
+
+                                        {/* 主动技能：展示施放消耗与冷却配置 (含范围技能的半径) */}
+                                        {skill.type === 'active' && (
+                                            <div className="text-[10px] font-mono text-blue-300/70 -mt-1.5 mb-3">
+                                                消耗 {skill.manaCost ?? 0} 法力 · 冷却 {skill.cooldown ?? 0} 秒
+                                                {skill.effect?.kind === 'damage' && skill.effect.radius ? ` · 范围 ${skill.effect.radius} 米` : ''}
+                                            </div>
+                                        )}
 
                                         {/* 交互：升级按钮。仅在已解锁、点数足够且未满级时可用 */}
                                         {isUnlocked && (
