@@ -1,10 +1,178 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
-import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2 } from 'lucide-react';
+import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2, Target, Flame, Heart, Zap, Wind } from 'lucide-react';
 import { InventoryPanel } from './InventoryPanel';
 import { SkillTreePanel } from './SkillTreePanel';
 import { ShopPanel } from './ShopPanel';
 import { motion, AnimatePresence } from 'framer-motion';
+import type { Skill } from '../../store/gameStore';
+
+/**
+ * 根据 Store 中的图标名称映射 Lucide 图标组件
+ */
+const renderSkillIcon = (iconName: string, size = 18) => {
+    switch (iconName) {
+        case 'Target': return <Target size={size} />;
+        case 'Flame': return <Flame size={size} />;
+        case 'Heart': return <Heart size={size} />;
+        case 'Wind': return <Wind size={size} />;
+        default: return <Zap size={size} />;
+    }
+};
+
+interface ActionBarSlotProps {
+    slotIndex: number;
+    boundSkill: Skill | null;
+    isSelected: boolean;
+    playerMana: number;
+    onSelect: (slotIndex: number) => void;
+    onClear: (slotIndex: number) => void;
+}
+
+/**
+ * 动作栏槽位组件
+ * 仅负责渲染：从全局 Store 读取冷却时间戳，通过一个本地轻量计时器
+ * 每 100ms 刷新剩余冷却秒数用于显示。所有游戏状态仍在 Store 中，
+ * 组件本身不记录任何业务状态。
+ */
+const ActionBarSlot: React.FC<ActionBarSlotProps> = ({
+    slotIndex, boundSkill, isSelected, playerMana, onSelect, onClear,
+}) => {
+    const getSkillCooldownRemaining = useGameStore(s => s.getSkillCooldownRemaining);
+
+    // 本地仅用于驱动倒计时显示与冷却结束脉冲，不是业务状态
+    const [remainingMs, setRemainingMs] = useState(0);
+    const [trackedSkillId, setTrackedSkillId] = useState<string | null>(null);
+    const [justReady, setJustReady] = useState(false);
+    const wasOnCooldownRef = React.useRef(false);
+
+    // 当绑定技能被清空时，同步重置倒计时显示
+    if (trackedSkillId !== (boundSkill?.id ?? null)) {
+        setTrackedSkillId(boundSkill?.id ?? null);
+        if (!boundSkill && remainingMs !== 0) {
+            setRemainingMs(0);
+        }
+    }
+
+    useEffect(() => {
+        if (!boundSkill) {
+            return;
+        }
+        const tick = () => {
+            const left = getSkillCooldownRemaining(boundSkill.id);
+            setRemainingMs(left);
+
+            // 冷却从 >0 变为 0 的瞬间，触发一次就绪脉冲
+            if (wasOnCooldownRef.current && left === 0) {
+                setJustReady(true);
+                window.setTimeout(() => setJustReady(false), 800);
+            }
+            wasOnCooldownRef.current = left > 0;
+        };
+        // 首次 tick 放到下一帧，避免在 effect 中同步 setState 触发级联渲染
+        const raf = window.requestAnimationFrame(tick);
+        const timer = window.setInterval(tick, 100);
+        return () => {
+            window.cancelAnimationFrame(raf);
+            window.clearInterval(timer);
+        };
+    }, [boundSkill, getSkillCooldownRemaining]);
+
+    // 汇总该技能所有 effects 中声明的耗蓝
+    const manaCost = boundSkill?.effects
+        ? boundSkill.effects.reduce((sum, e) => sum + (e.manaCost ?? 0), 0)
+        : 0;
+    const cooldownMs = boundSkill?.effects
+        ? boundSkill.effects.reduce((mx, e) => Math.max(mx, e.cooldown ?? 0), 0)
+        : 0;
+
+    const isOnCooldown = remainingMs > 0;
+    const notEnoughMana = !!boundSkill && playerMana < manaCost;
+    const blocked = isOnCooldown || notEnoughMana;
+
+    let statusHint = '';
+    if (boundSkill) {
+        if (isOnCooldown) statusHint = `冷却中 ${(remainingMs / 1000).toFixed(1)}s`;
+        else if (notEnoughMana) statusHint = `法力不足（需 ${manaCost} MP）`;
+        else statusHint = `${boundSkill.name}（左键选中/取消，右键解绑）`;
+    } else {
+        statusHint = `空槽位 ${slotIndex + 1}：打开技能树绑定主动技能`;
+    }
+
+    const remainingPct = isOnCooldown && cooldownMs > 0
+        ? Math.min(100, (remainingMs / cooldownMs) * 100)
+        : 0;
+
+    return (
+        <button
+            onClick={() => onSelect(slotIndex)}
+            onContextMenu={(e) => {
+                e.preventDefault();
+                if (boundSkill) onClear(slotIndex);
+            }}
+            title={statusHint}
+            className={`relative w-10 h-10 rounded-full border transition-all flex items-center justify-center text-xs font-bold overflow-hidden
+                ${boundSkill
+                    ? isSelected
+                        ? 'bg-purple-600/80 border-purple-300 text-white shadow-lg shadow-purple-900/50 ring-2 ring-purple-400/60'
+                        : 'bg-black/40 border-white/10 text-slate-200 hover:border-purple-400/60 hover:bg-purple-500/20'
+                    : 'bg-black/40 border border-dashed border-white/10 text-slate-600 hover:border-white/30 hover:text-slate-400'
+                }
+                ${blocked && boundSkill ? 'grayscale' : ''}`}
+        >
+            {boundSkill ? (
+                <>
+                    {renderSkillIcon(boundSkill.icon, 18)}
+
+                    {/* 冷却倒计时遮罩：自下而上收缩 */}
+                    {isOnCooldown && (
+                        <div
+                            className="absolute inset-0 bg-black/60 pointer-events-none flex items-center justify-center"
+                            style={{
+                                clipPath: `inset(0 0 ${100 - remainingPct}% 0)`,
+                            }}
+                        />
+                    )}
+
+                    {/* 冷却秒数 / 蓝量不足角标 */}
+                    {isOnCooldown && (
+                        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono font-bold text-white drop-shadow pointer-events-none">
+                            {(remainingMs / 1000).toFixed(1)}
+                        </span>
+                    )}
+                    {!isOnCooldown && notEnoughMana && (
+                        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 text-[8px] font-bold text-blue-300 bg-slate-900/80 rounded px-0.5 leading-tight whitespace-nowrap pointer-events-none">
+                            {manaCost}MP
+                        </span>
+                    )}
+
+                    {/* 冷却结束瞬间的就绪脉冲反馈 */}
+                    <AnimatePresence>
+                        {justReady && (
+                            <motion.span
+                                initial={{ opacity: 0.8, scale: 0.6 }}
+                                animate={{ opacity: 0, scale: 1.4 }}
+                                exit={{ opacity: 0 }}
+                                transition={{ duration: 0.8, ease: 'easeOut' }}
+                                className="absolute inset-0 rounded-full pointer-events-none"
+                                style={{
+                                    boxShadow: 'inset 0 0 12px 2px rgba(192,132,252,0.9)',
+                                    border: '2px solid rgba(216,180,254,0.9)',
+                                }}
+                            />
+                        )}
+                    </AnimatePresence>
+
+                    <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-mono bg-slate-900/80 text-slate-300 rounded px-0.5 leading-tight">
+                        {slotIndex + 1}
+                    </span>
+                </>
+            ) : (
+                slotIndex + 1
+            )}
+        </button>
+    );
+};
 
 /**
  * HUD (Heads-Up Display) 主组件
@@ -14,7 +182,9 @@ export const HUD: React.FC = () => {
     // 从 Store 中获取数据与控制函数
     const {
         player, logs, addItem, ui,
-        setInventoryOpen, setSkillsOpen, setShopOpen
+        setInventoryOpen, setSkillsOpen, setShopOpen,
+        skills, actionBarSlots, selectedSkillId,
+        selectSkillSlot, clearSkillSlot,
     } = useGameStore();
 
     // 控制下方战斗日志面板的折叠状态
@@ -173,12 +343,25 @@ export const HUD: React.FC = () => {
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
-                    {/* 动作栏占位符：用于未来绑定快捷技能 */}
-                    {[1, 2, 3].map((slot) => (
-                        <button key={slot} className="w-10 h-10 bg-black/40 rounded-full border border-white/5 hover:border-white/20 transition-all flex items-center justify-center font-bold text-slate-500 text-xs">
-                            {slot}
-                        </button>
-                    ))}
+                    {/* 动作栏：三个可绑定主动技能的快捷槽位 */}
+                    {actionBarSlots.map((skillId, slotIndex) => {
+                        const boundSkill = skillId
+                            ? skills.find(s => s.id === skillId) ?? null
+                            : null;
+                        const isSelected = selectedSkillId !== null && selectedSkillId === skillId;
+
+                        return (
+                            <ActionBarSlot
+                                key={slotIndex}
+                                slotIndex={slotIndex}
+                                boundSkill={boundSkill}
+                                isSelected={isSelected}
+                                playerMana={player.stats.mana}
+                                onSelect={selectSkillSlot}
+                                onClear={clearSkillSlot}
+                            />
+                        );
+                    })}
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 

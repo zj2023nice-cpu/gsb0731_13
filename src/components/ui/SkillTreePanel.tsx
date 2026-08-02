@@ -13,7 +13,10 @@ interface Props {
  */
 export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
     // 获取全局状态：玩家属性、技能列表、剩余技能点以及升级动作
-    const { player, skills, skillPoints, upgradeSkill } = useGameStore();
+    const {
+        player, skills, skillPoints, upgradeSkill,
+        actionBarSlots, bindSkillToSlot,
+    } = useGameStore();
 
     /**
      * 图标渲染辅助函数
@@ -77,6 +80,17 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                         // 实时计算该技能是否满足玩家当前的等级解锁条件
                         const isUnlocked = !skill.requirement || player.stats.level >= skill.requirement;
 
+                        // 主动技能汇总耗蓝、冷却与范围，用于卡片内展示
+                        const manaCost = skill.effects
+                            ? skill.effects.reduce((sum, e) => sum + (e.manaCost ?? 0), 0)
+                            : 0;
+                        const cooldownMs = skill.effects
+                            ? skill.effects.reduce((mx, e) => Math.max(mx, e.cooldown ?? 0), 0)
+                            : 0;
+                        const aoeRadius = skill.effects
+                            ? skill.effects.reduce((mx, e) => Math.max(mx, e.aoeRadius ?? 0), 0)
+                            : 0;
+
                         return (
                             <div
                                 key={skill.id}
@@ -95,11 +109,32 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                                             <h3 className="text-sm font-bold text-slate-100">{skill.name}</h3>
                                             <span className="text-[10px] font-mono text-dim">等级 {skill.level}/{skill.maxLevel}</span>
                                         </div>
-                                        <p className="text-[11px] text-dim leading-snug mb-3">
+                                        <p className="text-[11px] text-dim leading-snug mb-2">
                                             {skill.description}
                                             {/* 未达到等级需求时显示红色警告提示 */}
                                             {!isUnlocked && <span className="text-red-400 block mt-1">(需求等级: {skill.requirement})</span>}
                                         </p>
+
+                                        {/* 主动技能的耗蓝、冷却与范围标签 */}
+                                        {skill.type === 'active' && (manaCost > 0 || cooldownMs > 0 || aoeRadius > 0) && (
+                                            <div className="flex flex-wrap items-center gap-2 mb-2 text-[9px] font-bold uppercase tracking-wider">
+                                                {manaCost > 0 && (
+                                                    <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-400/20">
+                                                        耗蓝 {manaCost}
+                                                    </span>
+                                                )}
+                                                {cooldownMs > 0 && (
+                                                    <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-400/20">
+                                                        冷却 {(cooldownMs / 1000).toFixed(1)}s
+                                                    </span>
+                                                )}
+                                                {aoeRadius > 0 && (
+                                                    <span className="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-400/20">
+                                                        范围 {aoeRadius}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        )}
 
                                         {/* 交互：升级按钮。仅在已解锁、点数足够且未满级时可用 */}
                                         {isUnlocked && (
@@ -113,6 +148,29 @@ export const SkillTreePanel: React.FC<Props> = ({ onClose }) => {
                                             >
                                                 {skill.level === skill.maxLevel ? '已满级' : skillPoints > 0 ? '升级' : '点数不足'}
                                             </button>
+                                        )}
+
+                                        {/* 主动技能绑定动作栏：仅在技能已学习后展示 */}
+                                        {isUnlocked && skill.type === 'active' && skill.level > 0 && (
+                                            <div className="mt-2 flex items-center gap-1.5">
+                                                <span className="text-[9px] uppercase tracking-wider text-dim font-bold shrink-0">绑定至</span>
+                                                {actionBarSlots.map((boundId, slotIndex) => {
+                                                    const isBoundHere = boundId === skill.id;
+                                                    return (
+                                                        <button
+                                                            key={slotIndex}
+                                                            onClick={() => bindSkillToSlot(skill.id, slotIndex)}
+                                                            title={isBoundHere ? `已绑定到槽位 ${slotIndex + 1}` : `绑定到动作栏槽位 ${slotIndex + 1}`}
+                                                            className={`flex-1 py-1 rounded-md text-[10px] font-bold transition-all border ${isBoundHere
+                                                                    ? 'bg-purple-600/30 border-purple-400/60 text-purple-200'
+                                                                    : 'bg-slate-800/60 border-white/5 text-slate-400 hover:border-purple-400/40 hover:text-purple-200'
+                                                                }`}
+                                                        >
+                                                            {slotIndex + 1}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
                                         )}
                                     </div>
                                 </div>
