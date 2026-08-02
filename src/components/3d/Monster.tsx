@@ -1,60 +1,41 @@
-import React, { useState } from 'react';
+import React from 'react';
+import type { ThreeEvent } from '@react-three/fiber';
 import { useGameStore } from '../../store/gameStore';
 import { Html } from '@react-three/drei';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface MonsterProps {
     id: string;
-    position: [number, number, number];
-    name: string;
-    level: number;
-    hp: number;
-    maxHp: number;
 }
 
 /**
  * 怪物实体组件 (Monster Entity)
- * 处理怪物的 3D 渲染、简单的点击战斗逻辑及世界空间血条展示
+ * 仅负责 3D 渲染与点击事件转发；怪物血量、存活状态、伤害结算全部由全局 Store 托管，
+ * 保持 UI / 3D 渲染层与战斗状态逻辑解耦。
  */
-export const Monster: React.FC<MonsterProps> = ({ id, position, name, level, hp: initialHp, maxHp }) => {
-    // 怪物当前生命值状态 (局部状态，实际项目中应同步至 Store 以便全场景同步)
-    const [hp, setHp] = useState(initialHp);
-    const { addLog, addGold, ui } = useGameStore();
+export const Monster = React.memo(function Monster({ id }: MonsterProps) {
+    // 订阅该怪物自身的数据切片：只有当这只怪物数据变化时才重渲染
+    const monster = useGameStore(s => s.monsters.find(m => m.id === id));
+    const attackMonster = useGameStore(s => s.attackMonster);
+    const ui = useGameStore(s => s.ui);
 
     // 显隐逻辑：当 UI 面板（背包、技能树、商店）打开时隐藏 3D 悬浮 UI，防止视觉重合
     const showFloatingUI = !ui.isInventoryOpen && !ui.isSkillsOpen && !ui.isShopOpen;
 
+    // 怪物不存在或已死亡（等待刷新）时不渲染模型
+    if (!monster || !monster.alive) return null;
+
+    const { position, name, level, hp, maxHp } = monster;
+
     /**
-     * 点击交互处理：模拟基础攻击逻辑
-     * 只有在 UI 闭合状态下才允许点击世界中的怪物进行战斗
+     * 点击交互处理：将攻击结算委托给全局 Store
+     * 由 Store 根据当前选中的主动技能决定技能伤害或普通攻击
      */
-    const handleClick = (e: any) => {
+    const handleClick = (e: ThreeEvent<MouseEvent>) => {
         if (!showFloatingUI) return; // UI 面板打开时锁定世界交互
         e.stopPropagation(); // 阻止点击穿透到地表触发玩家移动
-
-        // --- 模拟战斗计算 ---
-        // 随机产生 5-10 点的基础伤害
-        const damage = Math.floor(Math.random() * 5) + 5;
-        const newHp = Math.max(0, hp - damage);
-
-        setHp(newHp);
-        addLog(`你攻击了 ${name}, 造成 ${damage} 点伤害!`);
-
-        // --- 死亡与重生处理逻辑 ---
-        if (newHp === 0) {
-            addLog(`${name} 被击败了! 获得 10 金币.`);
-            addGold(10); // 结算战利品
-
-            // 怪物重生计时器：5秒后恢复全血并重新渲染
-            setTimeout(() => {
-                setHp(maxHp);
-                addLog(`系统：${name} 已在其领地重新刷新。`);
-            }, 5000);
-        }
+        attackMonster(id);
     };
-
-    // 如果怪物血量为0（已死亡且未刷新阶段），不渲染模型核心
-    if (hp <= 0) return null;
 
     return (
         <group position={position} onClick={handleClick}>
@@ -98,4 +79,4 @@ export const Monster: React.FC<MonsterProps> = ({ id, position, name, level, hp:
             </AnimatePresence>
         </group>
     );
-};
+});

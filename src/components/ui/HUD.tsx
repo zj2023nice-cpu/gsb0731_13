@@ -1,10 +1,24 @@
 import React, { useState } from 'react';
-import { useGameStore } from '../../store/gameStore';
-import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2 } from 'lucide-react';
+import { useGameStore, SKILL_COMBAT } from '../../store/gameStore';
+import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2, Zap, Target, Wind, Flame, Heart, Droplet } from 'lucide-react';
 import { InventoryPanel } from './InventoryPanel';
 import { SkillTreePanel } from './SkillTreePanel';
 import { ShopPanel } from './ShopPanel';
 import { motion, AnimatePresence } from 'framer-motion';
+
+/**
+ * 动作栏技能图标映射
+ * 与技能树面板保持一致的图标集合，根据技能 icon 字段渲染对应 Lucide 图标
+ */
+const getSlotIcon = (iconName: string) => {
+    switch (iconName) {
+        case 'Target': return <Target size={18} />;
+        case 'Wind': return <Wind size={18} />;
+        case 'Flame': return <Flame size={18} />;
+        case 'Heart': return <Heart size={18} />;
+        default: return <Zap size={18} />;
+    }
+};
 
 /**
  * HUD (Heads-Up Display) 主组件
@@ -13,8 +27,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 export const HUD: React.FC = () => {
     // 从 Store 中获取数据与控制函数
     const {
-        player, logs, addItem, ui,
-        setInventoryOpen, setSkillsOpen, setShopOpen
+        player, logs, addItem, ui, skills,
+        actionBar, selectedSkillId, bindingSlotIndex,
+        cooldowns, readyFlash, now,
+        setInventoryOpen, setSkillsOpen, setShopOpen,
+        setBindingSlot, selectSkill, unbindSlot,
     } = useGameStore();
 
     // 控制下方战斗日志面板的折叠状态
@@ -173,12 +190,108 @@ export const HUD: React.FC = () => {
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
-                    {/* 动作栏占位符：用于未来绑定快捷技能 */}
-                    {[1, 2, 3].map((slot) => (
-                        <button key={slot} className="w-10 h-10 bg-black/40 rounded-full border border-white/5 hover:border-white/20 transition-all flex items-center justify-center font-bold text-slate-500 text-xs">
-                            {slot}
-                        </button>
-                    ))}
+                    {/* 动作栏槽位：空槽点击进入绑定模式（自动拉起技能树）；已绑技能左键选择/取消，右键解绑；冷却中/蓝不足有直观遮罩 */}
+                    {[0, 1, 2].map((slot) => {
+                        const skillId = actionBar[slot];
+                        const skill = skillId ? skills.find(s => s.id === skillId) : null;
+                        const cfg = skillId ? SKILL_COMBAT[skillId] : null;
+                        const isSelected = !!skill && selectedSkillId === skill.id;
+                        const isBinding = bindingSlotIndex === slot;
+
+                        // 冷却状态：从全局时钟计算剩余时间与进度比例
+                        const cooldownEnd = skill ? (cooldowns[skill.id] ?? 0) : 0;
+                        const remainingMs = cooldownEnd > now ? cooldownEnd - now : 0;
+                        const onCooldown = remainingMs > 0;
+                        const cooldownPct = onCooldown && cfg && cfg.cooldown > 0
+                            ? remainingMs / cfg.cooldown
+                            : 0;
+
+                        // 蓝量状态
+                        const manaCost = cfg?.manaCost ?? 0;
+                        const notEnoughMana = !!skill && manaCost > 0 && player.stats.mana < manaCost;
+
+                        // 冷却结束就绪反馈：readyFlash 记录了冷却结束的时间戳，1.5 秒内播放脉冲
+                        const readyAt = skill ? (readyFlash[skill.id] ?? 0) : 0;
+                        const showReady = !onCooldown && readyAt > 0 && now - readyAt < 1500;
+
+                        return (
+                            <button
+                                key={slot}
+                                onClick={() => {
+                                    if (skill) {
+                                        selectSkill(skill.id);
+                                    } else {
+                                        setBindingSlot(slot);
+                                    }
+                                }}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    if (skill) unbindSlot(slot);
+                                }}
+                                title={
+                                    skill
+                                        ? `${skill.name} LV.${skill.level}｜耗蓝 ${manaCost}${cfg ? `｜冷却 ${(cfg.cooldown / 1000).toFixed(1)}秒` : ''}${onCooldown ? `（冷却中 ${(remainingMs / 1000).toFixed(1)}秒）` : notEnoughMana ? '（法力不足）' : ''}（左键选择/取消，右键解绑）`
+                                        : `第 ${slot + 1} 格：点击绑定主动技能`
+                                }
+                                className={`w-10 h-10 rounded-full transition-all flex items-center justify-center relative overflow-hidden border ${
+                                    isSelected
+                                        ? 'bg-purple-600 text-white shadow-lg shadow-purple-900/40 border-purple-400'
+                                        : isBinding
+                                        ? 'bg-purple-500/20 border-purple-400 text-purple-200 animate-pulse'
+                                        : skill
+                                        ? notEnoughMana
+                                            ? 'bg-black/40 border-blue-400/60 text-slate-500'
+                                            : 'bg-black/40 border-white/10 hover:border-white/30 text-slate-300 hover:text-white'
+                                        : 'bg-black/40 border-white/5 hover:border-white/20 text-slate-500 text-xs'
+                                }`}
+                            >
+                                {skill ? getSlotIcon(skill.icon) : slot + 1}
+
+                                {/* 冷却遮罩：黑色半透明覆盖层按剩余比例从底部收缩，并在中央显示倒计时数字 */}
+                                {onCooldown && (
+                                    <>
+                                        <div
+                                            className="absolute inset-0 bg-black/60 pointer-events-none"
+                                            style={{ clipPath: `inset(0 0 ${(1 - cooldownPct) * 100}% 0)` }}
+                                        />
+                                        <span className="absolute inset-0 flex items-center justify-center text-[11px] font-black text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.9)] pointer-events-none">
+                                            {(remainingMs / 1000).toFixed(1)}
+                                        </span>
+                                    </>
+                                )}
+
+                                {/* 冷却结束就绪脉冲：黄色光环向外扩散，key 随时间戳变化以重播动画 */}
+                                {showReady && (
+                                    <motion.span
+                                        key={readyAt}
+                                        className="absolute inset-0 rounded-full pointer-events-none border-2 border-yellow-300"
+                                        initial={{ opacity: 0.9, scale: 1 }}
+                                        animate={{ opacity: 0, scale: 1.7 }}
+                                        transition={{ duration: 0.9, ease: 'easeOut' }}
+                                    />
+                                )}
+
+                                {/* 蓝量不足提示：左上角水滴徽标，蓝不够时变红 */}
+                                {skill && manaCost > 0 && (
+                                    <span
+                                        className={`absolute top-0 left-0 text-[7px] font-bold px-1 py-px rounded-br-md rounded-tl-full flex items-center gap-0.5 border-r border-b border-slate-900 ${
+                                            notEnoughMana ? 'bg-red-600 text-white' : 'bg-blue-500/90 text-white'
+                                        }`}
+                                        title={`消耗 ${manaCost} 法力`}
+                                    >
+                                        <Droplet size={7} />{manaCost}
+                                    </span>
+                                )}
+
+                                {/* 已绑技能右下角显示技能等级徽标 */}
+                                {skill && (
+                                    <span className="absolute -bottom-0.5 -right-0.5 text-[8px] font-bold bg-purple-600 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center border border-slate-900">
+                                        {skill.level}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
