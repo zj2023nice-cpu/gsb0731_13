@@ -1,10 +1,25 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGameStore } from '../../store/gameStore';
-import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2 } from 'lucide-react';
+import { Shield, Sword, Coins, Backpack, BookOpen, MessageSquare, ChevronDown, ChevronUp, PlusCircle, Gamepad2, Target, Wind, Flame, Heart, Zap } from 'lucide-react';
 import { InventoryPanel } from './InventoryPanel';
 import { SkillTreePanel } from './SkillTreePanel';
 import { ShopPanel } from './ShopPanel';
 import { motion, AnimatePresence } from 'framer-motion';
+
+/**
+ * 技能图标映射：将 Store 中的图标名解析为 Lucide 组件
+ * 与技能树面板保持一致的图标语义
+ */
+const renderSkillIcon = (iconName: string, size = 18) => {
+    switch (iconName) {
+        case 'Target': return <Target size={size} />;
+        case 'Shield': return <Shield size={size} />;
+        case 'Wind': return <Wind size={size} />;
+        case 'Flame': return <Flame size={size} />;
+        case 'Heart': return <Heart size={size} />;
+        default: return <Zap size={size} />;
+    }
+};
 
 /**
  * HUD (Heads-Up Display) 主组件
@@ -13,12 +28,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 export const HUD: React.FC = () => {
     // 从 Store 中获取数据与控制函数
     const {
-        player, logs, addItem, ui,
+        player, logs, addItem, ui, skills, actionBar, selectedSkillId, cooldowns, selectSkill,
         setInventoryOpen, setSkillsOpen, setShopOpen
     } = useGameStore();
 
     // 控制下方战斗日志面板的折叠状态
     const [isLogExpanded, setIsLogExpanded] = useState(true);
+
+    // 本地时钟：每 100ms 触发一次重渲染，用于动作栏冷却倒计时的实时刷新
+    // （冷却终点时间戳存于全局状态，这里只负责驱动 UI 计时显示，不承载业务状态）
+    const [now, setNow] = useState(Date.now());
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 100);
+        return () => clearInterval(timer);
+    }, []);
 
     /**
      * 开发者调试函数：增加一个高级装备
@@ -173,12 +196,69 @@ export const HUD: React.FC = () => {
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
-                    {/* 动作栏占位符：用于未来绑定快捷技能 */}
-                    {[1, 2, 3].map((slot) => (
-                        <button key={slot} className="w-10 h-10 bg-black/40 rounded-full border border-white/5 hover:border-white/20 transition-all flex items-center justify-center font-bold text-slate-500 text-xs">
-                            {slot}
-                        </button>
-                    ))}
+                    {/* 动作栏：展示已绑定的快捷技能。点击选中该技能，再点怪物即按技能结算 */}
+                    {actionBar.map((skillId, index) => {
+                        const skill = skillId ? skills.find(s => s.id === skillId) : undefined;
+                        const isSelected = skill ? selectedSkillId === skill.id : false;
+
+                        // 冷却与法力状态：冷却终点时间戳存于全局，这里结合本地时钟换算实时剩余
+                        const readyAt = skill ? (cooldowns[skill.id] ?? 0) : 0;
+                        const cdRemain = Math.max(0, readyAt - now);
+                        const onCooldown = cdRemain > 0;
+                        const manaCost = skill?.combat?.manaCost ?? 0;
+                        const lackMana = skill ? player.stats.mana < manaCost : false;
+                        // 冷却中或蓝不足则禁用：既点不了也无法选中
+                        const disabled = !skill || onCooldown || lackMana;
+
+                        return (
+                            <button
+                                key={index}
+                                onClick={() => skill && selectSkill(skill.id)}
+                                disabled={disabled}
+                                title={
+                                    !skill
+                                        ? `空槽位 ${index + 1}：可在技能树中绑定主动技能`
+                                        : onCooldown
+                                            ? `${skill.name} 冷却中（剩余 ${(cdRemain / 1000).toFixed(1)}s）`
+                                            : lackMana
+                                                ? `${skill.name} 法力不足（需 ${manaCost} 点）`
+                                                : `${skill.name} · 耗蓝 ${manaCost}（点击选中后攻击怪物施放）`
+                                }
+                                className={`w-10 h-10 rounded-full border transition-all flex items-center justify-center relative overflow-hidden ${
+                                    !skill
+                                        ? 'bg-black/40 border-white/5 text-slate-500 text-xs font-bold'
+                                        : disabled
+                                            ? 'bg-slate-900/80 border-white/5 text-slate-600 cursor-not-allowed'
+                                            : isSelected
+                                                ? 'bg-amber-500 border-amber-300 text-white shadow-lg shadow-amber-900/40 ring-2 ring-amber-300'
+                                                : 'bg-slate-800/80 border-white/10 text-amber-300 hover:border-amber-400/60'
+                                }`}
+                            >
+                                {skill ? renderSkillIcon(skill.icon) : index + 1}
+
+                                {/* 冷却遮罩：显示剩余秒数，给出灰态倒计时反馈 */}
+                                {skill && onCooldown && (
+                                    <span className="absolute inset-0 bg-black/70 flex items-center justify-center text-[11px] font-bold text-white">
+                                        {(cdRemain / 1000).toFixed(1)}
+                                    </span>
+                                )}
+
+                                {/* 蓝不足角标：非冷却态下提示法力不足 */}
+                                {skill && !onCooldown && lackMana && (
+                                    <span className="absolute inset-0 bg-blue-950/60 flex items-center justify-center text-[8px] font-bold text-blue-300">
+                                        蓝不足
+                                    </span>
+                                )}
+
+                                {/* 已绑定技能显示当前等级角标 */}
+                                {skill && (
+                                    <span className="absolute -bottom-1 -right-1 bg-slate-900 text-[8px] font-bold px-1 rounded-full border border-white/10 z-10">
+                                        {skill.level}
+                                    </span>
+                                )}
+                            </button>
+                        );
+                    })}
 
                     <div className="w-px h-6 bg-white/10 mx-1"></div>
 
