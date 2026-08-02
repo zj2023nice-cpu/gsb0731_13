@@ -48,12 +48,12 @@ export const GameScene: React.FC = () => {
             />
 
             {/* 场景怪物生成区域 (Mob Spawning) */}
-            {/* 根据坐标、等级和数值手动配置各区域怪物 */}
-            <Monster id="m1" position={[5, 0, 5]} name="史莱姆" level={1} hp={30} maxHp={30} />
-            <Monster id="m2" position={[-5, 0, 8]} name="哥布林" level={2} hp={50} maxHp={50} />
-            <Monster id="m3" position={[8, 0, -5]} name="野狼" level={3} hp={80} maxHp={80} />
-            <Monster id="m4" position={[10, 0, 0]} name="史莱姆" level={1} hp={30} maxHp={30} />
-            <Monster id="m5" position={[-8, 0, -8]} name="精英哥布林" level={5} hp={150} maxHp={150} />
+            {/* 怪物的属性与血量由全局 Store 统一管理，这里只负责按 id 渲染 */}
+            <Monster id="m1" />
+            <Monster id="m2" />
+            <Monster id="m3" />
+            <Monster id="m4" />
+            <Monster id="m5" />
 
         </Canvas>
     );
