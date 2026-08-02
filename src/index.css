@@ -1,0 +1,6 @@
+/* Base styles are now in styles/main.css and index.css handles tailwind entry points if needed */
+/* Clearing default vite styles to prevent layout conflicts */
+#root {
+  width: 100%;
+  height: 100%;
+}
